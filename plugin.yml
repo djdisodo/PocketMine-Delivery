@@ -1,0 +1,9 @@
+name: delivery
+version: "beta"
+api: [3.0.0-ALPHA10, 3.0.0-ALPHA11]
+author: djdisodo
+main: delivery\Delivery
+commands:
+  택배:
+    usage: /택배
+    description: 택배 관련 명령어
