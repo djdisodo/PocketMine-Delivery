@@ -16,57 +16,20 @@ class Delivery extends PluginBase {
         if(!file_exists($this->getDataFolder())) {
             @mkdir($this->getDataFolder());
         }
-        if(!file_exists($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.json')){
-            file_put_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.json', json_encode($this->data));
+        if(!file_exists($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.txt')){
+            file_put_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.txt', serialize(new Data()));
         }
+        Server::getInstance()->getPluginManager()->registerEvents(new PlayerJoinListener($this), $this);
         $this->load();
     }
     private function load() {
-        $this->data = json_decode(file_get_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.json'), true);
-        $newdata = [];
-        foreach($this->data as $player => $boxes) {
-        	foreach($boxes as $box => $data) {
-        		if($box == 'sendbox') {
-        			foreach($data as $data2 => $val) {
-        				$newdata[$player][$box][$data2] = unserialize($val);
-        			}
-        		} else {
-        			foreach($data as $delivery => $items) {
-        				foreach($items as $data2 => $val) {
-        					if($data2 == 'from' or $data2 == 'name') {
-        						$newdata[$player][$box][$delivery][$data2] = $val;
-        					} else {
-        						$newdata[$player][$box][$delivery][$data2] = unserialize($val);
-        					}
-        				}
-        			}
-        		}
-        	}
-        }
-        $this->data = $newdata;
+        $this->data = unserialize(file_get_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.txt'));
+        $this->data = $this->data->data;
     }
     private function save() {
-    	$newdata = [];
-    	foreach($this->data as $player => $boxes) {
-    		foreach($boxes as $box => $data) {
-    			if($box == 'sendbox') {
-    				foreach($data as $data2 => $val) {
-    					$newdata[$player][$box][$data2] = serialize($val);
-    				}
-    			} else {
-    				foreach($data as $delivery => $items) {
-    					foreach($items as $data2 => $val) {
-    						if($data2 == 'from' or $data2 == 'name') {
-    							$newdata[$player][$box][$delivery][$data2] = $val;
-    						} else {
-    							$newdata[$player][$box][$delivery][$data2] = serialize($val);
-    						}
-    					}
-    				}
-    			}
-    		}
-    	}
-        file_put_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.json', json_encode($newdata));
+    	$aa = new Data();
+    	$aa->data = $this->data;
+        file_put_contents($this->getDataFolder() . DIRECTORY_SEPARATOR . 'data.txt', serialize($aa));
     }
     static function dropTo(Player $player, array $items) {
     	foreach($items as $item) {
@@ -74,6 +37,15 @@ class Delivery extends PluginBase {
     		$player->dropItem($item);
     	}
     	return;
+    }
+    public function onJoin(Player $player) {
+    	$this->load();
+    	if(isset($this->data[strtolower($player->getName())]['inbox'])) {
+    		$player->sendMessage(TextFormat::BOLD . TextFormat::AQUA . '받은 택배가 있습니다');
+    		foreach($this->data[strtolower($player->getName())]['inbox'] as $key => $boxes) {
+    			$player->sendMessage($key . '. 제목: ' . $boxes['name'] . ' from ' . $boxes['from']);
+    		}
+    	}
     }
     public function onCommand(CommandSender $sender, Command $command,string $label,array $args) : bool {
         $this->load();
@@ -134,6 +106,9 @@ class Delivery extends PluginBase {
                 $item->setCount((int)$args[1]);
                 $this->data[strtolower($sender->getName())]['sendbox'][] = $item;
                 $sender->sendMessage($item->getName() . '을 ' . (int)$args[1] . '개 보낼 상자에 추가하였습니다.');
+                $handing = $sender->getInventory()->getItemInHand();
+                $handing->setCount($handing->getCount() - (int)$args[1]);
+                $sender->getInventory()->setItemInHand($handing);
                 $this->save();
                 break;
             case '초기화':
@@ -155,13 +130,18 @@ class Delivery extends PluginBase {
             		$sender->sendMessage('-' . $item->getName() . ' ' . $item->getCount() . '개');
             	}
             	break;
-            case 'send'://TODO 한글
+            case 'send':
             	if(!isset($args[1])) {
             		$sender->sendMessage('/택배 보내기' . TextFormat::RED . '<플레이어> ' . TextFormat::RESET . '<택배제목(선택사항)>');
             		break;
             	}
             	if(!isset($this->data[strtolower($sender->getName())]['sendbox'])) {
             		$sender->sendMessage('보낼 택배가 없습니다');
+            		break;
+            	}
+            	if(strtolower($sender->getName()) == strtolower($args[1])) {
+            		$sender->sendMessage('자신에게 택배를 보낼 순 없습니다(악용방지)');
+            		break;
             	}
             	foreach (scandir(Server::getInstance()->getDataPath() . DIRECTORY_SEPARATOR . 'players' . DIRECTORY_SEPARATOR) as $plname) {
             		if(strtolower($plname) == strtolower($args[1]) . '.dat') {
@@ -173,6 +153,12 @@ class Delivery extends PluginBase {
             			$this->data[strtolower($args[1])]['inbox'][] = $this->data[strtolower($sender->getName())]['sendbox'];
             			unset($this->data[strtolower($sender->getName())]['sendbox']);
             			$sender->sendMessage(substr($plname, 0, -4) . '에게 택배를 보냈습니다');
+            			if($this->getServer()->getPlayer(substr($plname, 0, -4))->isOnline()){
+            				$this->getServer()->getPlayer(substr($plname, 0, -4))->sendMessage($sender->getName() . '으로부터 택배가 왔습니다');
+            				$bb = end($this->data[strtolower(substr($plname, 0, -4))]['inbox']);
+            				$aa = array_keys($this->data[strtolower(substr($plname, 0, -4))]['inbox']);
+            				$sender->sendMessage(end($aa) . '. 제목: ' . $bb['name'] . ' from ' . $bb['from']);
+            			}
             			$this->save();
             			break 2;
             		}
@@ -210,6 +196,9 @@ class Delivery extends PluginBase {
             		$newArr[] = $inbox;
             	}
             	$this->data[strtolower($sender->getName())]['inbox'] = $newArr;
+            	if(count($this->data[strtolower($sender->getName())]['inbox']) <= 0) {
+            		unset($this->data[strtolower($sender->getName())]['inbox']);
+            	}
             	$sender->sendMessage('택배를 수령했습니다');
             	$this->save();
         }
